@@ -71,6 +71,18 @@ object GameEngine {
     fun kingCount(state: GameState, player: Player): Int =
         state.board.sumOf { row -> row.count { it?.player == player && it.king } }
 
+    fun edgePieceCount(state: GameState, player: Player): Int {
+        var count = 0
+        for (row in 0..7) {
+            for (col in 0..7) {
+                if (state.board[row][col]?.player == player && (col == 0 || col == 7)) {
+                    count++
+                }
+            }
+        }
+        return count
+    }
+
     fun winner(state: GameState): Player? {
         if (pieceCount(state, Player.RED) == 0) return Player.RED
         if (pieceCount(state, Player.BLACK) == 0) return Player.BLACK
@@ -82,6 +94,11 @@ object GameEngine {
         return null
     }
 
+    /**
+     * Captures are compulsory. If more than one capture route exists, only
+     * first steps belonging to a route that captures the maximum possible
+     * number of enemy pieces are legal.
+     */
     fun legalMoves(
         state: GameState,
         player: Player = state.turn,
@@ -92,16 +109,25 @@ object GameEngine {
         if (forced != null) {
             val piece = state.board.getOrNull(forced.row)?.getOrNull(forced.col)
             if (piece?.player == player) {
-                return capturesFrom(state.board, forced, piece)
+                val captures = capturesFrom(state.board, forced, piece)
+                return maximumCaptureFirstSteps(state.board, captures, piece)
             }
         }
 
-        val captures = mutableListOf<Move>()
+        val captureCandidates = mutableListOf<Pair<Move, Piece>>()
         forEachPiece(state.board, player) { pos, piece ->
-            captures += capturesFrom(state.board, pos, piece)
+            capturesFrom(state.board, pos, piece).forEach { move ->
+                captureCandidates += move to piece
+            }
         }
 
-        if (captures.isNotEmpty()) return captures
+        if (captureCandidates.isNotEmpty()) {
+            val scored = captureCandidates.map { (move, piece) ->
+                move to captureLengthForMove(state.board, move, piece)
+            }
+            val maximum = scored.maxOf { it.second }
+            return scored.filter { it.second == maximum }.map { it.first }
+        }
 
         val normalMoves = mutableListOf<Move>()
         forEachPiece(state.board, player) { pos, piece ->
@@ -109,6 +135,16 @@ object GameEngine {
         }
 
         return normalMoves
+    }
+
+    fun maximumCaptureCount(state: GameState, player: Player): Int {
+        var best = 0
+        forEachPiece(state.board, player) { pos, piece ->
+            for (move in capturesFrom(state.board, pos, piece)) {
+                best = max(best, captureLengthForMove(state.board, move, piece))
+            }
+        }
+        return best
     }
 
     fun applyMove(state: GameState, requestedMove: Move): GameState {
@@ -124,20 +160,13 @@ object GameEngine {
         mutable[move.from.row][move.from.col] = null
         move.captured?.let { mutable[it.row][it.col] = null }
 
-        if (!movingPiece.king) {
-            val promote =
-                (movingPiece.player == Player.RED && move.to.row == 0) ||
-                    (movingPiece.player == Player.BLACK && move.to.row == 7)
-
-            if (promote) {
-                movingPiece = movingPiece.copy(king = true)
-            }
-        }
-
+        movingPiece = promoteIfNeeded(movingPiece, move.to)
         mutable[move.to.row][move.to.col] = movingPiece
         val newBoard = mutable.map { it.toList() }
 
         if (move.captured != null) {
+            // Promotion takes effect immediately. If the new king can keep
+            // capturing, the same turn must continue with that king.
             val moreCaptures = capturesFrom(newBoard, move.to, movingPiece)
             if (moreCaptures.isNotEmpty()) {
                 return state.copy(
@@ -153,6 +182,51 @@ object GameEngine {
             forcedPiece = null,
             moveNumber = state.moveNumber + 1
         )
+    }
+
+    private fun maximumCaptureFirstSteps(
+        board: List<List<Piece?>>,
+        captures: List<Move>,
+        piece: Piece
+    ): List<Move> {
+        if (captures.isEmpty()) return emptyList()
+        val scored = captures.map { move ->
+            move to captureLengthForMove(board, move, piece)
+        }
+        val maximum = scored.maxOf { it.second }
+        return scored.filter { it.second == maximum }.map { it.first }
+    }
+
+    private fun captureLengthForMove(
+        board: List<List<Piece?>>,
+        move: Move,
+        piece: Piece
+    ): Int {
+        if (move.captured == null) return 0
+
+        val mutable = board.map { it.toMutableList() }.toMutableList()
+        mutable[move.from.row][move.from.col] = null
+        mutable[move.captured.row][move.captured.col] = null
+
+        val movedPiece = promoteIfNeeded(piece, move.to)
+        mutable[move.to.row][move.to.col] = movedPiece
+        val nextBoard = mutable.map { it.toList() }
+
+        val continuations = capturesFrom(nextBoard, move.to, movedPiece)
+        if (continuations.isEmpty()) return 1
+
+        val bestContinuation = continuations.maxOf {
+            captureLengthForMove(nextBoard, it, movedPiece)
+        }
+        return 1 + bestContinuation
+    }
+
+    private fun promoteIfNeeded(piece: Piece, to: Pos): Piece {
+        if (piece.king) return piece
+        val promote =
+            (piece.player == Player.RED && to.row == 0) ||
+                (piece.player == Player.BLACK && to.row == 7)
+        return if (promote) piece.copy(king = true) else piece
     }
 
     private fun normalMovesFrom(
@@ -287,10 +361,32 @@ object GameEngine {
 }
 
 enum class Difficulty {
-    EASY, MEDIUM, HARD
+    EASY, MEDIUM, HARD, GOD
 }
 
 object ComputerPlayer {
+    private data class AiProfile(
+        val maxDepth: Int,
+        val timeBudgetMs: Long,
+        val randomness: Int
+    )
+
+    private enum class TTFlag {
+        EXACT, LOWER, UPPER
+    }
+
+    private data class TTEntry(
+        val depth: Int,
+        val value: Int,
+        val flag: TTFlag
+    )
+
+    private class SearchTimeout : RuntimeException()
+
+    private val transposition = HashMap<Long, TTEntry>()
+    private var deadlineNanos: Long = Long.MAX_VALUE
+    private var searchedNodes: Int = 0
+
     fun chooseMove(
         state: GameState,
         computer: Player,
@@ -298,40 +394,88 @@ object ComputerPlayer {
     ): Move? {
         val moves = GameEngine.legalMoves(state)
         if (moves.isEmpty()) return null
+        if (moves.size == 1) return moves.first()
 
-        if (difficulty == Difficulty.EASY) {
-            return moves.random()
+        val profile = when (difficulty) {
+            Difficulty.EASY -> AiProfile(maxDepth = 3, timeBudgetMs = 350, randomness = 120)
+            Difficulty.MEDIUM -> AiProfile(maxDepth = 5, timeBudgetMs = 850, randomness = 45)
+            Difficulty.HARD -> AiProfile(maxDepth = 8, timeBudgetMs = 1700, randomness = 8)
+            Difficulty.GOD -> AiProfile(maxDepth = 13, timeBudgetMs = 3000, randomness = 0)
         }
 
-        val depth = when (difficulty) {
-            Difficulty.EASY -> 1
-            Difficulty.MEDIUM -> 3
-            Difficulty.HARD -> 5
-        }
+        val totalPieces =
+            GameEngine.pieceCount(state, Player.RED) +
+                GameEngine.pieceCount(state, Player.BLACK)
 
-        var bestScore = Int.MIN_VALUE
-        val bestMoves = mutableListOf<Move>()
+        val effectiveMaxDepth =
+            if (difficulty == Difficulty.GOD && totalPieces <= 10) 18
+            else profile.maxDepth
 
-        for (move in moves) {
-            val next = GameEngine.applyMove(state, move)
-            val score = minimax(
-                state = next,
-                depth = depth - 1,
-                alphaStart = Int.MIN_VALUE + 1,
-                betaStart = Int.MAX_VALUE,
-                computer = computer
-            )
+        transposition.clear()
+        searchedNodes = 0
+        deadlineNanos = System.nanoTime() + profile.timeBudgetMs * 1_000_000L
 
-            if (score > bestScore) {
-                bestScore = score
-                bestMoves.clear()
-                bestMoves += move
-            } else if (score == bestScore) {
-                bestMoves += move
+        var bestMove = moves.first()
+        var completedScores: List<Pair<Move, Int>> = moves.map { it to 0 }
+
+        // Every level uses the same anti-checkers engine. Difficulty changes
+        // search depth, search time and how much imperfection is intentionally
+        // added to the final choice.
+        for (depth in 1..effectiveMaxDepth) {
+            try {
+                val scores = searchRoot(state, computer, depth)
+                if (scores.isNotEmpty()) {
+                    completedScores = scores
+                    bestMove = scores.maxBy { it.second }.first
+                }
+            } catch (_: SearchTimeout) {
+                break
             }
         }
 
-        return bestMoves.randomOrNull(Random.Default)
+        if (profile.randomness == 0) {
+            return bestMove
+        }
+
+        val jittered = completedScores.map { (move, score) ->
+            move to (score + Random.nextInt(-profile.randomness, profile.randomness + 1))
+        }
+        return jittered.maxBy { it.second }.first
+    }
+
+    private fun searchRoot(
+        state: GameState,
+        computer: Player,
+        depth: Int
+    ): List<Pair<Move, Int>> {
+        checkDeadline()
+
+        val moves = orderedMoves(state, GameEngine.legalMoves(state), computer)
+        val scores = mutableListOf<Pair<Move, Int>>()
+
+        var alpha = Int.MIN_VALUE + 1
+        val beta = Int.MAX_VALUE
+
+        for (move in moves) {
+            checkDeadline()
+            val next = GameEngine.applyMove(state, move)
+            val nextDepth =
+                if (next.turn == state.turn) depth
+                else depth - 1
+
+            val score = minimax(
+                state = next,
+                depth = nextDepth,
+                alphaStart = alpha,
+                betaStart = beta,
+                computer = computer
+            )
+
+            scores += move to score
+            alpha = max(alpha, score)
+        }
+
+        return scores
     }
 
     private fun minimax(
@@ -341,13 +485,39 @@ object ComputerPlayer {
         betaStart: Int,
         computer: Player
     ): Int {
-        val winner = GameEngine.winner(state)
-        if (winner != null) {
-            return if (winner == computer) 100_000 + depth else -100_000 - depth
+        searchedNodes++
+        if ((searchedNodes and 255) == 0) {
+            checkDeadline()
         }
 
-        if (depth <= 0) {
+        val winner = GameEngine.winner(state)
+        if (winner != null) {
+            return if (winner == computer) {
+                1_000_000 + depth * 100
+            } else {
+                -1_000_000 - depth * 100
+            }
+        }
+
+        // Never stop the search in the middle of a forced multi-capture.
+        if (depth <= 0 && state.forcedPiece == null) {
             return evaluate(state, computer)
+        }
+
+        var alpha = alphaStart
+        var beta = betaStart
+        val originalAlpha = alpha
+        val originalBeta = beta
+
+        val key = stateHash(state, computer)
+        val cached = transposition[key]
+        if (cached != null && cached.depth >= depth) {
+            when (cached.flag) {
+                TTFlag.EXACT -> return cached.value
+                TTFlag.LOWER -> alpha = max(alpha, cached.value)
+                TTFlag.UPPER -> beta = min(beta, cached.value)
+            }
+            if (alpha >= beta) return cached.value
         }
 
         val moves = GameEngine.legalMoves(state)
@@ -355,50 +525,75 @@ object ComputerPlayer {
             return evaluate(state, computer)
         }
 
-        var alpha = alphaStart
-        var beta = betaStart
+        val ordered = orderedMoves(state, moves, computer)
+        val maximizing = state.turn == computer
+        var value = if (maximizing) Int.MIN_VALUE else Int.MAX_VALUE
 
-        return if (state.turn == computer) {
-            var value = Int.MIN_VALUE
+        for (move in ordered) {
+            val next = GameEngine.applyMove(state, move)
+            val nextDepth =
+                if (next.turn == state.turn) depth
+                else depth - 1
 
-            for (move in moves) {
-                value = max(
-                    value,
-                    minimax(
-                        GameEngine.applyMove(state, move),
-                        depth - 1,
-                        alpha,
-                        beta,
-                        computer
-                    )
-                )
+            val child = minimax(
+                state = next,
+                depth = nextDepth,
+                alphaStart = alpha,
+                betaStart = beta,
+                computer = computer
+            )
+
+            if (maximizing) {
+                value = max(value, child)
                 alpha = max(alpha, value)
-                if (beta <= alpha) break
-            }
-
-            value
-        } else {
-            var value = Int.MAX_VALUE
-
-            for (move in moves) {
-                value = min(
-                    value,
-                    minimax(
-                        GameEngine.applyMove(state, move),
-                        depth - 1,
-                        alpha,
-                        beta,
-                        computer
-                    )
-                )
+            } else {
+                value = min(value, child)
                 beta = min(beta, value)
-                if (beta <= alpha) break
             }
 
-            value
+            if (beta <= alpha) break
+        }
+
+        val flag = when {
+            value <= originalAlpha -> TTFlag.UPPER
+            value >= originalBeta -> TTFlag.LOWER
+            else -> TTFlag.EXACT
+        }
+        transposition[key] = TTEntry(depth, value, flag)
+
+        return value
+    }
+
+    private fun orderedMoves(
+        state: GameState,
+        moves: List<Move>,
+        computer: Player
+    ): List<Move> {
+        val maximizing = state.turn == computer
+        return moves.sortedBy { move ->
+            val next = GameEngine.applyMove(state, move)
+            val score = fastOrderingScore(next, computer)
+            if (maximizing) -score else score
         }
     }
 
+    private fun fastOrderingScore(state: GameState, computer: Player): Int {
+        val opponent = computer.opponent()
+        val ownPieces = GameEngine.pieceCount(state, computer)
+        val opponentPieces = GameEngine.pieceCount(state, opponent)
+        val ownForced = GameEngine.maximumCaptureCount(state, computer)
+        val opponentForced = GameEngine.maximumCaptureCount(state, opponent)
+
+        return (opponentPieces - ownPieces) * 100 +
+            (opponentForced - ownForced) * 45
+    }
+
+    /**
+     * Anti-checkers evaluation. All difficulty levels use these same ideas:
+     * lose your own pieces, create forced sacrifices, avoid being forced to
+     * remove the opponent's pieces, and work toward positions with little or
+     * no mobility.
+     */
     private fun evaluate(state: GameState, computer: Player): Int {
         val opponent = computer.opponent()
 
@@ -407,22 +602,81 @@ object ComputerPlayer {
         val ownKings = GameEngine.kingCount(state, computer)
         val opponentKings = GameEngine.kingCount(state, opponent)
 
-        val ownMobility = GameEngine.legalMoves(
-            state,
+        val ownMoves = GameEngine.legalMoves(
+            state.copy(turn = computer, forcedPiece = null),
             computer,
             respectForcedPiece = false
         ).size
 
-        val opponentMobility = GameEngine.legalMoves(
-            state,
+        val opponentMoves = GameEngine.legalMoves(
+            state.copy(turn = opponent, forcedPiece = null),
             opponent,
             respectForcedPiece = false
         ).size
 
-        // Reverse-checkers goal: fewer of your own pieces and fewer legal moves
-        // are generally desirable because zero pieces OR zero legal moves wins.
-        return (opponentPieces - ownPieces) * 100 +
-            (opponentKings - ownKings) * 12 +
-            (opponentMobility - ownMobility) * 3
+        val ownForcedCapture = GameEngine.maximumCaptureCount(state, computer)
+        val opponentForcedCapture = GameEngine.maximumCaptureCount(state, opponent)
+
+        val ownEdges = GameEngine.edgePieceCount(state, computer)
+        val opponentEdges = GameEngine.edgePieceCount(state, opponent)
+
+        var score =
+            (opponentPieces - ownPieces) * 170 +
+                (opponentKings - ownKings) * 14 +
+                (opponentMoves - ownMoves) * 5 +
+                (opponentEdges - ownEdges) * 4
+
+        // A capture available to the opponent means our pieces are being
+        // offered as sacrifices. A capture available to us means we may be
+        // forced to help the opponent get rid of theirs.
+        score += opponentForcedCapture * 80
+        score -= ownForcedCapture * 70
+
+        if (state.turn == opponent && opponentForcedCapture > 0) {
+            score += opponentForcedCapture * 55
+        }
+        if (state.turn == computer && ownForcedCapture > 0) {
+            score -= ownForcedCapture * 55
+        }
+
+        // In losing checkers, low mobility can be a weapon because having no
+        // legal move wins. Reward positions that are closer to that goal.
+        if (ownMoves <= 2) score += (3 - ownMoves) * 18
+        if (opponentMoves <= 2) score -= (3 - opponentMoves) * 18
+
+        return score
+    }
+
+    private fun stateHash(state: GameState, computer: Player): Long {
+        var hash = 0xcbf29ce484222325UL.toLong()
+        val prime = 0x100000001b3UL.toLong()
+
+        for (row in 0..7) {
+            for (col in 0..7) {
+                val piece = state.board[row][col]
+                val code = when {
+                    piece == null -> 0L
+                    piece.player == Player.RED && !piece.king -> 1L
+                    piece.player == Player.RED && piece.king -> 2L
+                    piece.player == Player.BLACK && !piece.king -> 3L
+                    else -> 4L
+                }
+                hash = (hash xor (code + (row * 8 + col) * 7L)) * prime
+            }
+        }
+
+        hash = (hash xor if (state.turn == Player.RED) 11L else 13L) * prime
+        hash = (hash xor if (computer == Player.RED) 17L else 19L) * prime
+        state.forcedPiece?.let {
+            hash = (hash xor (23L + it.row * 8L + it.col)) * prime
+        }
+
+        return hash
+    }
+
+    private fun checkDeadline() {
+        if (System.nanoTime() >= deadlineNanos) {
+            throw SearchTimeout()
+        }
     }
 }

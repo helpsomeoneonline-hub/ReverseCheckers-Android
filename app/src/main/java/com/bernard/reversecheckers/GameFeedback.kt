@@ -63,7 +63,8 @@ class GameFeedback(context: Context) {
     }
 
     private fun play(type: Int, durationMs: Int) {
-        if (soundEnabled) {
+        if (!soundEnabled) return
+        runCatching {
             tone.startTone(type, durationMs)
         }
     }
@@ -72,10 +73,13 @@ class GameFeedback(context: Context) {
     private fun vibrate(pattern: LongArray) {
         if (!vibrationEnabled) return
         val v = vibrator ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            v.vibrate(VibrationEffect.createWaveform(pattern, -1))
-        } else {
-            v.vibrate(pattern, -1)
+
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                v.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            } else {
+                v.vibrate(pattern, -1)
+            }
         }
     }
 }

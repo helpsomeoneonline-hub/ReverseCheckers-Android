@@ -3,6 +3,11 @@ package com.bernard.reversecheckers
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,19 +31,29 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -59,10 +74,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = Color(0xFFE53935),
+                    primary = Color(0xFFE63B3B),
                     secondary = Color(0xFFFFC857),
-                    surface = Color(0xFF17191D),
-                    background = Color(0xFF0E1013)
+                    surface = Color(0xFF181A20),
+                    background = Color(0xFF0A0B0E)
                 )
             ) {
                 ReverseCheckersApp()
@@ -73,22 +88,50 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun ReverseCheckersApp() {
+    val context = LocalContext.current
+    val feedback = remember { GameFeedback(context) }
     var gameMode by remember { mutableStateOf<GameMode?>(null) }
     var difficulty by remember { mutableStateOf(Difficulty.MEDIUM) }
+    var soundEnabled by remember { mutableStateOf(true) }
+    var vibrationEnabled by remember { mutableStateOf(true) }
+
+    feedback.soundEnabled = soundEnabled
+    feedback.vibrationEnabled = vibrationEnabled
+
+    DisposableEffect(Unit) {
+        onDispose { feedback.release() }
+    }
 
     Surface(modifier = Modifier.fillMaxSize()) {
         if (gameMode == null) {
             MainMenu(
                 difficulty = difficulty,
-                onDifficultyChange = { difficulty = it },
-                onPlayComputer = { gameMode = GameMode.COMPUTER },
-                onLocalTwoPlayer = { gameMode = GameMode.LOCAL_TWO_PLAYER }
+                onDifficultyChange = {
+                    feedback.select()
+                    difficulty = it
+                },
+                onPlayComputer = {
+                    feedback.select()
+                    gameMode = GameMode.COMPUTER
+                },
+                onLocalTwoPlayer = {
+                    feedback.select()
+                    gameMode = GameMode.LOCAL_TWO_PLAYER
+                }
             )
         } else {
             GameScreen(
                 mode = gameMode!!,
                 difficulty = difficulty,
-                onExit = { gameMode = null }
+                feedback = feedback,
+                soundEnabled = soundEnabled,
+                vibrationEnabled = vibrationEnabled,
+                onSoundEnabledChange = { soundEnabled = it },
+                onVibrationEnabledChange = { vibrationEnabled = it },
+                onExit = {
+                    feedback.select()
+                    gameMode = null
+                }
             )
         }
     }
@@ -104,13 +147,22 @@ private fun MainMenu(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF08090C),
+                        Color(0xFF191116),
+                        Color(0xFF08090C)
+                    )
+                )
+            )
+            .padding(22.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
-            modifier = Modifier.widthIn(max = 520.dp),
+            modifier = Modifier.widthIn(max = 540.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
                 text = "REVERSE CHECKERS",
@@ -120,30 +172,33 @@ private fun MainMenu(
             )
 
             Text(
-                text = "Lose all your pieces to win.",
+                text = "Lose your pieces. Outsmart the board.",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.secondary
             )
 
             Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(12.dp, RoundedCornerShape(22.dp)),
+                shape = RoundedCornerShape(22.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     Text(
-                        text = "How it works",
+                        text = "Rules",
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text("• Captures are compulsory.")
-                    Text("• If several capture routes exist, you must take a route that captures the most pieces.")
-                    Text("• If another jump is available, you must continue.")
-                    Text("• A piece that becomes king during a capture continues immediately as a king.")
-                    Text("• Kings can move and capture across diagonals.")
-                    Text("• Get rid of every piece — or have no legal move — to win.")
+                    Text("• If several routes exist, you must take a route that captures the most pieces.")
+                    Text("• Multi-captures continue with the same piece.")
+                    Text("• Touching the king row during a capture does not crown the piece.")
+                    Text("• You become king only if the complete turn finishes on the king row.")
+                    Text("• Flying kings move and capture across diagonals.")
+                    Text("• Lose every piece — or have no legal move — to win.")
                 }
             }
 
@@ -152,25 +207,44 @@ private fun MainMenu(
                 fontWeight = FontWeight.SemiBold
             )
 
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Difficulty.entries.forEach { option ->
-                    FilterChip(
-                        modifier = Modifier.weight(1f),
-                        selected = difficulty == option,
-                        onClick = { onDifficultyChange(option) },
-                        label = {
-                            Text(
-                                text = option.name.lowercase()
-                                    .replaceFirstChar { it.uppercase() },
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
+                Difficulty.entries.chunked(2).forEach { rowOptions ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowOptions.forEach { option ->
+                            FilterChip(
+                                modifier = Modifier.weight(1f),
+                                selected = difficulty == option,
+                                onClick = { onDifficultyChange(option) },
+                                label = {
+                                    Text(
+                                        text = if (option == Difficulty.GOD) "⚡ GOD" else option.name,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        fontWeight = if (option == Difficulty.GOD) FontWeight.Black else FontWeight.Medium
+                                    )
+                                }
                             )
                         }
-                    )
+                        if (rowOptions.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
                 }
+            }
+
+            if (difficulty == Difficulty.GOD) {
+                Text(
+                    text = "No intentional mistakes. Deep search. No mercy.",
+                    color = Color(0xFFFFC857),
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
             }
 
             Button(
@@ -194,22 +268,82 @@ private fun MainMenu(
 private fun GameScreen(
     mode: GameMode,
     difficulty: Difficulty,
+    feedback: GameFeedback,
+    soundEnabled: Boolean,
+    vibrationEnabled: Boolean,
+    onSoundEnabledChange: (Boolean) -> Unit,
+    onVibrationEnabledChange: (Boolean) -> Unit,
     onExit: () -> Unit
 ) {
     var state by remember(mode, difficulty) { mutableStateOf(GameState.initial()) }
     var selected by remember { mutableStateOf<Pos?>(null) }
+    var lastFrom by remember { mutableStateOf<Pos?>(null) }
+    var lastTo by remember { mutableStateOf<Pos?>(null) }
+    var chompPos by remember { mutableStateOf<Pos?>(null) }
+    var chompEvent by remember { mutableIntStateOf(0) }
+    var kingPos by remember { mutableStateOf<Pos?>(null) }
+    var kingEvent by remember { mutableIntStateOf(0) }
+    var previousWinner by remember { mutableStateOf<Player?>(null) }
 
     val winner = GameEngine.winner(state)
     val legalMoves = if (winner == null) GameEngine.legalMoves(state) else emptyList()
     val captureRequired = legalMoves.any { it.captured != null }
+    val maxCapture = if (captureRequired) GameEngine.maximumCaptureCount(state, state.turn) else 0
     val computerTurn =
         mode == GameMode.COMPUTER &&
             state.turn == Player.BLACK &&
             winner == null
 
+    fun applyVisualMove(move: Move) {
+        val beforePiece = state.board[move.from.row][move.from.col]
+        val next = GameEngine.applyMove(state, move)
+        val afterPiece = next.board[move.to.row][move.to.col]
+
+        lastFrom = move.from
+        lastTo = move.to
+
+        if (move.captured != null) {
+            chompPos = move.captured
+            chompEvent++
+            feedback.capture()
+        } else {
+            feedback.move()
+        }
+
+        if (beforePiece?.king == false && afterPiece?.king == true) {
+            kingPos = move.to
+            kingEvent++
+            feedback.king()
+        }
+
+        state = next
+        selected = next.forcedPiece
+    }
+
+    LaunchedEffect(chompEvent) {
+        if (chompEvent > 0) {
+            delay(440)
+            chompPos = null
+        }
+    }
+
+    LaunchedEffect(kingEvent) {
+        if (kingEvent > 0) {
+            delay(750)
+            kingPos = null
+        }
+    }
+
+    LaunchedEffect(winner) {
+        if (winner != null && previousWinner != winner) {
+            feedback.win()
+        }
+        previousWinner = winner
+    }
+
     LaunchedEffect(state, mode, difficulty) {
         if (computerTurn) {
-            delay(320)
+            delay(if (difficulty == Difficulty.GOD) 220 else 320)
             val move = withContext(Dispatchers.Default) {
                 ComputerPlayer.chooseMove(
                     state = state,
@@ -219,8 +353,8 @@ private fun GameScreen(
             }
 
             if (move != null) {
-                state = GameEngine.applyMove(state, move)
-                selected = state.forcedPiece
+                if (difficulty == Difficulty.GOD) feedback.godMove()
+                applyVisualMove(move)
             }
         }
     }
@@ -228,18 +362,32 @@ private fun GameScreen(
     fun newGame() {
         state = GameState.initial()
         selected = null
+        lastFrom = null
+        lastTo = null
+        chompPos = null
+        kingPos = null
+        previousWinner = null
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF090A0D),
+                        Color(0xFF14161B),
+                        Color(0xFF090A0D)
+                    )
+                )
+            )
             .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 680.dp),
+                .widthIn(max = 700.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -249,15 +397,23 @@ private fun GameScreen(
 
             Text(
                 text = if (mode == GameMode.COMPUTER) {
-                    "VS COMPUTER • ${difficulty.name}"
+                    if (difficulty == Difficulty.GOD) "VS ⚡ GOD" else "VS COMPUTER • ${difficulty.name}"
                 } else {
                     "LOCAL 2 PLAYER"
                 },
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
+                fontWeight = FontWeight.Black,
+                fontSize = 13.sp,
+                color = if (difficulty == Difficulty.GOD && mode == GameMode.COMPUTER) {
+                    Color(0xFFFFC857)
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                }
             )
 
-            TextButton(onClick = { newGame() }) {
+            TextButton(onClick = {
+                feedback.select()
+                newGame()
+            }) {
                 Text("Restart")
             }
         }
@@ -266,7 +422,9 @@ private fun GameScreen(
             state = state,
             winner = winner,
             captureRequired = captureRequired,
-            computerTurn = computerTurn
+            maxCapture = maxCapture,
+            computerTurn = computerTurn,
+            difficulty = difficulty
         )
 
         Spacer(modifier = Modifier.size(10.dp))
@@ -277,7 +435,7 @@ private fun GameScreen(
                 .weight(1f),
             contentAlignment = Alignment.TopCenter
         ) {
-            val boardSize = minOf(maxWidth, maxHeight, 640.dp)
+            val boardSize = minOf(maxWidth, maxHeight, 660.dp)
 
             GameBoard(
                 modifier = Modifier.size(boardSize),
@@ -285,6 +443,12 @@ private fun GameScreen(
                 selected = selected,
                 legalMoves = legalMoves,
                 inputEnabled = winner == null && !computerTurn,
+                lastFrom = lastFrom,
+                lastTo = lastTo,
+                chompPos = chompPos,
+                chompEvent = chompEvent,
+                kingPos = kingPos,
+                kingEvent = kingEvent,
                 onSquareTapped = { pos ->
                     if (winner != null || computerTurn) return@GameBoard
 
@@ -297,8 +461,7 @@ private fun GameScreen(
                         }
 
                         if (move != null) {
-                            state = GameEngine.applyMove(state, move)
-                            selected = state.forcedPiece
+                            applyVisualMove(move)
                             return@GameBoard
                         }
                     }
@@ -308,6 +471,7 @@ private fun GameScreen(
                         legalMoves.any { it.from == pos }
                     ) {
                         selected = pos
+                        feedback.select()
                     } else if (state.forcedPiece == null) {
                         selected = null
                     }
@@ -315,15 +479,30 @@ private fun GameScreen(
             )
         }
 
-        Text(
-            text = "Reverse rules: maximum captures are compulsory. Lose every piece — or run out of legal moves — to win.",
+        Row(
             modifier = Modifier
-                .widthIn(max = 680.dp)
-                .padding(vertical = 8.dp),
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+                .fillMaxWidth()
+                .widthIn(max = 700.dp)
+                .padding(vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Sound", fontSize = 12.sp)
+                Switch(
+                    checked = soundEnabled,
+                    onCheckedChange = onSoundEnabledChange
+                )
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Vibration", fontSize = 12.sp)
+                Switch(
+                    checked = vibrationEnabled,
+                    onCheckedChange = onVibrationEnabledChange
+                )
+            }
+        }
     }
 }
 
@@ -332,7 +511,9 @@ private fun StatusPanel(
     state: GameState,
     winner: Player?,
     captureRequired: Boolean,
-    computerTurn: Boolean
+    maxCapture: Int,
+    computerTurn: Boolean,
+    difficulty: Difficulty
 ) {
     val redCount = GameEngine.pieceCount(state, Player.RED)
     val blackCount = GameEngine.pieceCount(state, Player.BLACK)
@@ -340,24 +521,31 @@ private fun StatusPanel(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .widthIn(max = 680.dp),
-        shape = RoundedCornerShape(16.dp)
+            .widthIn(max = 700.dp)
+            .shadow(8.dp, RoundedCornerShape(18.dp)),
+        shape = RoundedCornerShape(18.dp)
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Red: $redCount", fontWeight = FontWeight.Bold)
-                Text("Black: $blackCount", fontWeight = FontWeight.Bold)
+                Text("RED  $redCount", fontWeight = FontWeight.Black)
+                Text("BLACK  $blackCount", fontWeight = FontWeight.Black)
             }
 
             val message = when {
                 winner != null ->
-                    "${winner.displayName()} wins! They got rid of their pieces or ran out of moves."
+                    "${winner.displayName()} WINS"
+
+                computerTurn && difficulty == Difficulty.GOD && state.forcedPiece != null ->
+                    "GOD is continuing the forced capture…"
+
+                computerTurn && difficulty == Difficulty.GOD ->
+                    "GOD is calculating…"
 
                 computerTurn && state.forcedPiece != null ->
                     "Computer is continuing its capture…"
@@ -369,7 +557,7 @@ private fun StatusPanel(
                     "${state.turn.displayName()} must continue jumping."
 
                 captureRequired ->
-                    "${state.turn.displayName()} to move — maximum capture required."
+                    "${state.turn.displayName()} — MAXIMUM CAPTURE: $maxCapture"
 
                 else ->
                     "${state.turn.displayName()} to move."
@@ -379,11 +567,12 @@ private fun StatusPanel(
                 text = message,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
-                fontWeight = FontWeight.SemiBold,
-                color = if (captureRequired || state.forcedPiece != null) {
-                    MaterialTheme.colorScheme.secondary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
+                fontWeight = FontWeight.Black,
+                color = when {
+                    winner != null -> Color(0xFFFFC857)
+                    difficulty == Difficulty.GOD && computerTurn -> Color(0xFFFFC857)
+                    captureRequired || state.forcedPiece != null -> Color(0xFFFFC857)
+                    else -> MaterialTheme.colorScheme.onSurface
                 }
             )
         }
@@ -397,6 +586,12 @@ private fun GameBoard(
     selected: Pos?,
     legalMoves: List<Move>,
     inputEnabled: Boolean,
+    lastFrom: Pos?,
+    lastTo: Pos?,
+    chompPos: Pos?,
+    chompEvent: Int,
+    kingPos: Pos?,
+    kingEvent: Int,
     onSquareTapped: (Pos) -> Unit
 ) {
     val selectedTargets = remember(selected, legalMoves) {
@@ -413,12 +608,20 @@ private fun GameBoard(
 
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .shadow(18.dp, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
             .border(
-                width = 2.dp,
-                color = Color(0xFF767A82),
-                shape = RoundedCornerShape(10.dp)
+                width = 5.dp,
+                brush = Brush.linearGradient(
+                    listOf(
+                        Color(0xFF2A2D33),
+                        Color(0xFF777B82),
+                        Color(0xFF1A1C21)
+                    )
+                ),
+                shape = RoundedCornerShape(16.dp)
             )
+            .padding(5.dp)
     ) {
         for (row in 0..7) {
             Row(modifier = Modifier.weight(1f)) {
@@ -429,18 +632,30 @@ private fun GameBoard(
                     val isSelected = selected == pos
                     val isTarget = pos in selectedTargets
                     val isMovable = pos in movablePieces
+                    val wasLast = pos == lastFrom || pos == lastTo
 
-                    val squareColor = if (isDark) {
-                        Color(0xFF4E342E)
+                    val squareBrush = if (isDark) {
+                        Brush.linearGradient(
+                            listOf(Color(0xFF332A2A), Color(0xFF15171B))
+                        )
                     } else {
-                        Color(0xFFD7CCC8)
+                        Brush.linearGradient(
+                            listOf(Color(0xFFD7D0C5), Color(0xFF9C958C))
+                        )
                     }
 
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .background(squareColor)
+                            .background(squareBrush)
+                            .then(
+                                if (wasLast) {
+                                    Modifier.border(2.dp, Color(0x66FFC857))
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .then(
                                 if (isSelected) {
                                     Modifier.border(3.dp, Color(0xFFFFC857))
@@ -456,17 +671,27 @@ private fun GameBoard(
                         if (isTarget) {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxSize(0.28f)
+                                    .fillMaxSize(0.30f)
                                     .clip(CircleShape)
-                                    .background(Color(0xAAFFC857))
+                                    .background(Color(0xCCFFC857))
+                                    .border(2.dp, Color.White.copy(alpha = 0.45f), CircleShape)
                             )
                         }
 
                         if (piece != null) {
                             PieceView(
                                 piece = piece,
-                                canMove = isMovable && inputEnabled
+                                canMove = isMovable && inputEnabled,
+                                selected = isSelected
                             )
+                        }
+
+                        if (chompPos == pos) {
+                            ChompEffect(event = chompEvent)
+                        }
+
+                        if (kingPos == pos) {
+                            KingFlash(event = kingEvent)
                         }
                     }
                 }
@@ -478,36 +703,179 @@ private fun GameBoard(
 @Composable
 private fun PieceView(
     piece: Piece,
-    canMove: Boolean
+    canMove: Boolean,
+    selected: Boolean
 ) {
-    val pieceColor = if (piece.player == Player.RED) {
-        Color(0xFFD73535)
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.10f else 1f,
+        animationSpec = tween(140, easing = FastOutSlowInEasing),
+        label = "pieceScale"
+    )
+
+    val lift by animateFloatAsState(
+        targetValue = if (selected) -7f else 0f,
+        animationSpec = tween(140),
+        label = "pieceLift"
+    )
+
+    val colors = if (piece.player == Player.RED) {
+        listOf(
+            Color(0xFFFF8A80),
+            Color(0xFFD62F3A),
+            Color(0xFF6E1118)
+        )
     } else {
-        Color(0xFF15171A)
+        listOf(
+            Color(0xFF8B9098),
+            Color(0xFF25282E),
+            Color(0xFF050607)
+        )
     }
 
-    val edgeColor = when {
+    val edge = when {
+        selected -> Color(0xFFFFD875)
         canMove -> Color(0xFFFFC857)
-        piece.player == Player.RED -> Color(0xFFFF8A80)
-        else -> Color(0xFF9EA3AA)
+        piece.player == Player.RED -> Color(0xFFFFA8A2)
+        else -> Color(0xFF9FA4AD)
     }
 
     Box(
         modifier = Modifier
-            .fillMaxSize(0.72f)
+            .fillMaxSize(0.76f)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationY = lift
+            }
+            .shadow(if (selected) 10.dp else 6.dp, CircleShape)
             .clip(CircleShape)
-            .background(pieceColor)
-            .border(3.dp, edgeColor, CircleShape),
+            .background(
+                Brush.radialGradient(
+                    colors = colors
+                )
+            )
+            .border(if (selected) 3.dp else 2.dp, edge, CircleShape),
         contentAlignment = Alignment.Center
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize(0.68f)
+                .clip(CircleShape)
+                .border(
+                    1.dp,
+                    Color.White.copy(alpha = 0.18f),
+                    CircleShape
+                )
+        )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(9.dp)
+                .fillMaxSize(0.16f)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.24f))
+        )
+
         if (piece.king) {
             Text(
                 text = "♛",
                 color = Color(0xFFFFD166),
-                fontSize = 25.sp,
+                fontSize = 27.sp,
                 fontWeight = FontWeight.Black
             )
         }
+    }
+}
+
+@Composable
+private fun ChompEffect(event: Int) {
+    val progress = remember { Animatable(0f) }
+
+    LaunchedEffect(event) {
+        progress.snapTo(0f)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(360, easing = FastOutSlowInEasing)
+        )
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val p = progress.value
+        val w = size.width
+        val h = size.height
+        val fade = (1f - p).coerceIn(0f, 1f)
+
+        drawCircle(
+            color = Color(0x99E53935).copy(alpha = 0.55f * fade),
+            radius = w * (0.26f + 0.18f * p)
+        )
+
+        val topY = h * (0.18f + 0.20f * p)
+        val bottomY = h * (0.82f - 0.20f * p)
+        val jawHeight = h * 0.17f
+
+        drawRoundRect(
+            color = Color(0xFFE03B3B).copy(alpha = fade),
+            topLeft = Offset(w * 0.08f, topY - jawHeight),
+            size = Size(w * 0.84f, jawHeight),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(12f, 12f)
+        )
+        drawRoundRect(
+            color = Color(0xFF9D1820).copy(alpha = fade),
+            topLeft = Offset(w * 0.08f, bottomY),
+            size = Size(w * 0.84f, jawHeight),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(12f, 12f)
+        )
+
+        for (i in 0..3) {
+            val x0 = w * (0.20f + i * 0.16f)
+
+            val topTooth = Path().apply {
+                moveTo(x0, topY)
+                lineTo(x0 + w * 0.07f, topY)
+                lineTo(x0 + w * 0.035f, topY + h * 0.10f)
+                close()
+            }
+            drawPath(topTooth, Color.White.copy(alpha = fade))
+
+            val bottomTooth = Path().apply {
+                moveTo(x0, bottomY)
+                lineTo(x0 + w * 0.07f, bottomY)
+                lineTo(x0 + w * 0.035f, bottomY - h * 0.10f)
+                close()
+            }
+            drawPath(bottomTooth, Color.White.copy(alpha = fade))
+        }
+    }
+}
+
+@Composable
+private fun KingFlash(event: Int) {
+    val progress = remember { Animatable(0f) }
+
+    LaunchedEffect(event) {
+        progress.snapTo(0f)
+        progress.animateTo(1f, tween(620))
+    }
+
+    val p = progress.value
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = 0.75f + p * 0.75f
+                scaleY = 0.75f + p * 0.75f
+                alpha = (1f - p).coerceIn(0f, 1f)
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "♛",
+            color = Color(0xFFFFD166),
+            fontSize = 40.sp,
+            fontWeight = FontWeight.Black
+        )
     }
 }
 

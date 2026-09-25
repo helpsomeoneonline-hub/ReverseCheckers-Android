@@ -14,7 +14,7 @@ Offline Android APK for reverse / anti-checkers.
 - Men can capture forward or backward
 - Multi-captures must continue with the same piece
 - When several capture routes exist, only a route that captures the maximum possible number of pieces is legal
-- Promotion takes effect immediately during a capture, and the new king must continue capturing when possible
+- A man that touches the king row during a capture stays a man until the capture sequence ends; it is crowned only if the complete turn finishes on the king row
 - Kings are flying kings and may move any distance diagonally
 - A player wins by losing all their pieces or by having no legal move
 
@@ -24,3 +24,13 @@ Every push to the main branch runs the **Build Android APK** GitHub Action. The 
 
 ## AI
 All four difficulty levels use the same anti-checkers search engine and sacrifice-aware evaluation. Difficulty changes search depth, search time, and intentional randomness. God mode removes intentional randomness, uses iterative deepening, alpha-beta pruning, a transposition table, deeper endgame search, forced-sacrifice evaluation, capture-pressure evaluation, and mobility/trap evaluation.
+
+
+## Presentation
+- 3D-styled board and checker pieces
+- Selected-piece lift animation
+- Last-move highlighting
+- Jaw-style CHOMP capture animation
+- King-promotion flash
+- Built-in move, capture, king, win, and God-mode sound cues
+- Optional vibration/haptic feedback with in-game Sound and Vibration switches

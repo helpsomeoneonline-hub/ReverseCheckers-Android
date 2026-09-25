@@ -160,13 +160,13 @@ object GameEngine {
         mutable[move.from.row][move.from.col] = null
         move.captured?.let { mutable[it.row][it.col] = null }
 
-        movingPiece = promoteIfNeeded(movingPiece, move.to)
+        // During a capture chain a man stays a man, even if it touches the
+        // promotion row. Crowning happens only after the entire turn ends on
+        // the promotion row.
         mutable[move.to.row][move.to.col] = movingPiece
-        val newBoard = mutable.map { it.toList() }
+        var newBoard = mutable.map { it.toList() }
 
         if (move.captured != null) {
-            // Promotion takes effect immediately. If the new king can keep
-            // capturing, the same turn must continue with that king.
             val moreCaptures = capturesFrom(newBoard, move.to, movingPiece)
             if (moreCaptures.isNotEmpty()) {
                 return state.copy(
@@ -174,6 +174,12 @@ object GameEngine {
                     forcedPiece = move.to
                 )
             }
+        }
+
+        val finalPiece = promoteIfNeeded(movingPiece, move.to)
+        if (finalPiece != movingPiece) {
+            mutable[move.to.row][move.to.col] = finalPiece
+            newBoard = mutable.map { it.toList() }
         }
 
         return GameState(
@@ -208,15 +214,16 @@ object GameEngine {
         mutable[move.from.row][move.from.col] = null
         mutable[move.captured.row][move.captured.col] = null
 
-        val movedPiece = promoteIfNeeded(piece, move.to)
-        mutable[move.to.row][move.to.col] = movedPiece
+        // A man is not crowned in the middle of a capture chain. This keeps
+        // maximum-capture calculation consistent with the actual move rule.
+        mutable[move.to.row][move.to.col] = piece
         val nextBoard = mutable.map { it.toList() }
 
-        val continuations = capturesFrom(nextBoard, move.to, movedPiece)
+        val continuations = capturesFrom(nextBoard, move.to, piece)
         if (continuations.isEmpty()) return 1
 
         val bestContinuation = continuations.maxOf {
-            captureLengthForMove(nextBoard, it, movedPiece)
+            captureLengthForMove(nextBoard, it, piece)
         }
         return 1 + bestContinuation
     }

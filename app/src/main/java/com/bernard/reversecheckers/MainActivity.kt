@@ -139,7 +139,9 @@ private fun MainMenu(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text("• Captures are compulsory.")
+                    Text("• If several capture routes exist, you must take a route that captures the most pieces.")
                     Text("• If another jump is available, you must continue.")
+                    Text("• A piece that becomes king during a capture continues immediately as a king.")
                     Text("• Kings can move and capture across diagonals.")
                     Text("• Get rid of every piece — or have no legal move — to win.")
                 }
@@ -314,7 +316,7 @@ private fun GameScreen(
         }
 
         Text(
-            text = "Reverse rules: the first player to lose every piece — or run out of legal moves — wins.",
+            text = "Reverse rules: maximum captures are compulsory. Lose every piece — or run out of legal moves — to win.",
             modifier = Modifier
                 .widthIn(max = 680.dp)
                 .padding(vertical = 8.dp),
@@ -367,7 +369,7 @@ private fun StatusPanel(
                     "${state.turn.displayName()} must continue jumping."
 
                 captureRequired ->
-                    "${state.turn.displayName()} to move — capture required."
+                    "${state.turn.displayName()} to move — maximum capture required."
 
                 else ->
                     "${state.turn.displayName()} to move."

@@ -57,6 +57,14 @@ class GameFeedback(context: Context) {
         play(ToneGenerator.TONE_PROP_NACK, 45)
     }
 
+    fun clockPress() {
+        play(ToneGenerator.TONE_PROP_ACK, 45)
+        handler.postDelayed({
+            play(ToneGenerator.TONE_PROP_BEEP, 35)
+        }, 48)
+        vibrate(longArrayOf(0, 18))
+    }
+
     fun release() {
         handler.removeCallbacksAndMessages(null)
         tone.release()

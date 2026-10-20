@@ -15,3 +15,6 @@ For every UI or feature update, audit navigation, system bars, keyboard, rotatio
 - Figma (optional visual design): https://www.figma.com/
 - Context7 (optional code documentation): https://context7.com/
 See docs/APP_DESIGN_QUALITY.md.
+
+## NON-NEGOTIABLE APK UPGRADE SIGNING RULE
+For every distributed Android APK, follow docs/ANDROID_SIGNING.md. Preserve applicationId and existing user data, strictly increment versionCode, reuse the app's persistent PRIVATE signing key from GitHub Actions Secrets, verify its pinned SHA-256 certificate fingerprint, and fail publication on absent or mismatched signing settings. NEVER publish APKs signed by a disposable runner-generated debug keystore as upgradeable builds. Do not commit/expose a signing key/password. Do not claim seamless upgrades without testing installed-old to installed-new; an APK public certificate cannot recover the private key.
